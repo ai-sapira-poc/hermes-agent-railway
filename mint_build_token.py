@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """Mint a GitHub App installation token at BUILD TIME for cloning a private repo.
 
-Reads secrets from BuildKit secret mounts (/run/secrets/...), never from argv,
-so nothing sensitive lands in image layers or `docker history`.
+Reads the App credentials from ENVIRONMENT VARIABLES (passed as Docker build ARGs,
+which Railway populates from service variables). Railway's config-as-code schema does
+NOT support `build.secrets` (verified against railway.schema.json: build has
+additionalProperties:false and no `secrets` key), so BuildKit secret mounts can't be
+fed by Railway here -- build ARGs are the supported channel.
 
-Required mounted secrets (files):
-    /run/secrets/GITHUB_APP_ID
-    /run/secrets/GITHUB_APP_PRIVATE_KEY   (PEM; may contain literal \\n escapes)
-Env:
-    INSTALLATION_ID   - installation to mint for (ai-sapira-poc = 137054357)
+Env (required):
+    GITHUB_APP_ID            - numeric App ID
+    GITHUB_APP_PRIVATE_KEY   - PEM private key (may contain literal \\n escapes)
+    INSTALLATION_ID          - installation to mint for (ai-sapira-poc = 137054357)
 
 Prints ONLY the token to stdout. All diagnostics go to stderr. Key material is
 never printed or logged.
@@ -21,23 +23,18 @@ import urllib.request
 import urllib.error
 
 
-def _read_secret(name: str) -> str:
-    path = f"/run/secrets/{name}"
-    try:
-        with open(path, "r") as f:
-            return f.read().strip()
-    except FileNotFoundError:
-        sys.stderr.write(f"[mint] missing build secret: {path}\n")
+def _require_env(name: str) -> str:
+    val = os.environ.get(name, "").strip()
+    if not val:
+        sys.stderr.write(f"[mint] required env not set: {name}\n")
         sys.exit(3)
+    return val
 
 
 def main() -> None:
-    app_id = _read_secret("GITHUB_APP_ID")
-    priv = _read_secret("GITHUB_APP_PRIVATE_KEY").replace("\\n", "\n")
-    inst = os.environ.get("INSTALLATION_ID", "").strip()
-    if not inst:
-        sys.stderr.write("[mint] INSTALLATION_ID env not set\n")
-        sys.exit(3)
+    app_id = _require_env("GITHUB_APP_ID")
+    priv = _require_env("GITHUB_APP_PRIVATE_KEY").replace("\\n", "\n")
+    inst = _require_env("INSTALLATION_ID")
 
     try:
         import jwt  # pyjwt[crypto]
@@ -68,7 +65,6 @@ def main() -> None:
             body = json.loads(e.read().decode()).get("message", "")
         except Exception:
             pass
-        # never echo key/jwt; only status + safe message
         sys.stderr.write(f"[mint] token mint failed: HTTP {e.code} {body!r}\n")
         sys.exit(5)
 
@@ -76,7 +72,6 @@ def main() -> None:
     if not token:
         sys.stderr.write("[mint] response had no token\n")
         sys.exit(6)
-    # ONLY the token to stdout
     sys.stdout.write(token)
 
 
