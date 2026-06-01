@@ -12,6 +12,16 @@ import time
 
 from aiohttp import web, ClientSession, WSMsgType
 
+# === WEBHOOK MOUNT === make the dev-brain-shared service code importable, defensively.
+# A missing/broken checkout must NOT crash the gateway (it serves the dashboard); it just
+# means the real-time webhook isn't mounted and the reconciliation cron remains the backstop.
+try:
+    sys.path.insert(0, "/opt/dev-brain-shared/scripts")
+    from webhook.app import attach_webhook
+except Exception as _wh_err:  # noqa: BLE001
+    print(f"[webhook] not mounted: {type(_wh_err).__name__}: {_wh_err}", file=sys.stderr)
+    attach_webhook = None
+
 HERMES_HOME = "/root/.hermes"
 UPSTREAM = "http://127.0.0.1:9119"
 USERNAME = os.environ.get("DASHBOARD_USER", "admin")
@@ -276,7 +286,8 @@ async def logout(request):
 
 @web.middleware
 async def auth_middleware(request, handler):
-    if request.path in ("/login", "/logout", "/api/health"):
+    # /webhook/github authenticates via GitHub HMAC signature, not the dashboard cookie.
+    if request.path in ("/login", "/logout", "/api/health", "/webhook/github"):
         return await handler(request)
 
     token = request.cookies.get(COOKIE)
@@ -440,6 +451,13 @@ def create_app():
     app.router.add_get("/api/health", health)
     app.router.add_post("/api/gateway/restart", restart_gateway)
     app.router.add_get("/api/gateway/status", gateway_status)
+    # === WEBHOOK MOUNT === register POST /webhook/github BEFORE the catch-all proxy route,
+    # else the "*" route swallows it. Skipped silently if the import above failed.
+    if attach_webhook is not None:
+        try:
+            attach_webhook(app)
+        except Exception as _e:  # noqa: BLE001
+            print(f"[webhook] attach failed: {type(_e).__name__}: {_e}", file=sys.stderr)
     app.router.add_route("*", "/{path_info:.*}", proxy)
     return app
 
