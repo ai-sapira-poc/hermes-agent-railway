@@ -2,10 +2,6 @@
 builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
 
-[build.secrets]
-GITHUB_APP_ID = "${{ GITHUB_APP_ID }}"
-GITHUB_APP_PRIVATE_KEY = "${{ GITHUB_APP_PRIVATE_KEY }}"
-
 [deploy]
 startCommand = "/entrypoint.sh"
 healthcheckPath = "/api/health"
