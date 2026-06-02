@@ -42,6 +42,11 @@ RUN set -eu; \
     TOKEN="$(GITHUB_APP_ID="$GITHUB_APP_ID" GITHUB_APP_PRIVATE_KEY="$GITHUB_APP_PRIVATE_KEY" INSTALLATION_ID="$INSTALLATION_ID" /tmp/minter/bin/python /tmp/mint_build_token.py)"; \
     git clone "https://x-access-token:${TOKEN}@github.com/ai-sapira-poc/dev-brain-shared.git" /opt/dev-brain-shared; \
     git -C /opt/dev-brain-shared checkout "$DEVBRAIN_REF"; \
+    METHOD_SHA="$(git -C /opt/dev-brain-shared rev-parse HEAD)"; \
+    METHOD_VERSION="$(git -C /opt/dev-brain-shared describe --tags --exact-match 2>/dev/null \
+                      || git -C /opt/dev-brain-shared describe --tags 2>/dev/null \
+                      || echo "$METHOD_SHA")"; \
+    printf 'DEV_BRAIN_METHOD_VERSION=%s\nDEV_BRAIN_METHOD_SHA=%s\n' "$METHOD_VERSION" "$METHOD_SHA" > /opt/method.env; \
     rm -rf /opt/dev-brain-shared/.git; \
     unset TOKEN; \
     rm -rf /tmp/minter /tmp/mint_build_token.py; \
