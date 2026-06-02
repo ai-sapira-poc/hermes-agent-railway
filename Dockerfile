@@ -31,7 +31,7 @@ ENV PATH="/opt/hermes-agent/venv/bin:$PATH"
 # the token-bearing remote URL. The token lives only in a shell var inside this single RUN.
 # NOTE: ARG values can appear in `docker history` of the intermediate layer; acceptable for
 # a self-owned private repo + short-lived token. Pinned for reproducible deploys (A1).
-ARG DEVBRAIN_REF=4777f9133159b74132a2ffd85703e4fb7a0686f7
+ARG DEVBRAIN_REF=31050b603540e3c99f176bed3b25f0a130628bf1
 ARG INSTALLATION_ID=137054357
 ARG GITHUB_APP_ID
 ARG GITHUB_APP_PRIVATE_KEY
