@@ -29,28 +29,31 @@ if [ "$AUTO_UPDATE" = "true" ]; then
   fi
 fi
 
-# === 5.6 profile seed === materialize operator (/root/.hermes) + architect
-# (/root/.hermes/profiles/architect) .env files from Railway service vars,
-# BEFORE any gateway/service starts. Idempotent + only-if-absent; non-fatal so a
-# seed failure never blocks the operator (it just means the architect bot is
-# unavailable). See dev-brain-shared/docs/5.6-RAILWAY-BOOT-SEED.md.
+# === per-product agent seed === materialize one isolated Hermes profile per
+# product (~/.hermes/profiles/agent-<product>) from dev-brain-shared's product
+# registry, BEFORE any gateway/service starts. Idempotent + only-if-absent;
+# non-fatal so a seed failure never blocks the box. Symmetric model: no
+# architect/operator — see dev-brain-shared/AGENTS-TOPOLOGY.md.
 if [ -f /opt/dev-brain-shared/scripts/deploy/seed_profiles.sh ]; then
   bash /opt/dev-brain-shared/scripts/deploy/seed_profiles.sh || \
-    echo "[seed] profile seed failed (non-fatal); architect bot may be unavailable" >&2
+    echo "[seed] agent seed failed (non-fatal); some product agents may be unavailable" >&2
 else
-  echo "[seed] seed_profiles.sh not found; skipping (architect bot unavailable)" >&2
+  echo "[seed] seed_profiles.sh not found; skipping (no product agents seeded)" >&2
 fi
 
-# Architect gateway: the operator's service is auth_proxy (below); the architect
-# is an interactive profile that needs its OWN gateway under its OWN HERMES_HOME.
-# Only started when its bot token is present (we won't run a tokenless gateway).
-if [ -n "${ARCHITECT_TELEGRAM_BOT_TOKEN:-}" ]; then
-  echo "Starting architect gateway..."
-  HERMES_HOME=/root/.hermes/profiles/architect \
-    hermes gateway run >/tmp/architect-gateway.log 2>&1 &
-else
-  echo "[architect] ARCHITECT_TELEGRAM_BOT_TOKEN unset; architect gateway not started" >&2
-fi
+# Start an interactive gateway for EACH seeded agent that has a bot token in its
+# own .env. Agents without a TELEGRAM_BOT_TOKEN run headless (webhook/cron only).
+# Each gateway runs under that agent's OWN HERMES_HOME -> full memory isolation.
+for agent_dir in /root/.hermes/profiles/agent-*/; do
+  [ -d "$agent_dir" ] || continue
+  agent_env="${agent_dir}.env"
+  if [ -f "$agent_env" ] && grep -q '^TELEGRAM_BOT_TOKEN=.\+' "$agent_env"; then
+    agent_name="$(basename "$agent_dir")"
+    echo "Starting gateway for ${agent_name}..."
+    HERMES_HOME="${agent_dir%/}" \
+      hermes gateway run >"/tmp/${agent_name}-gateway.log" 2>&1 &
+  fi
+done
 
 hermes dashboard --host 127.0.0.1 --port 9119 --no-open &
 
