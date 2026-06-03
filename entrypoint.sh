@@ -57,4 +57,27 @@ done
 
 hermes dashboard --host 127.0.0.1 --port 9119 --no-open &
 
+# === infra pin-drift guard (hourly) === runs INSIDE this service so it inherits
+# the DEVBRAIN_* GitHub App creds, the script, and the right working dir, and
+# survives redeploys (it is baked into the image). It compares the deployed
+# dev-brain-shared pin (DEV_BRAIN_METHOD_SHA) against main HEAD and, when behind,
+# opens a reviewable DEVBRAIN_REF bump PR on hermes-agent-railway. It NEVER merges
+# or redeploys. Disable with PIN_DRIFT_GUARD=false. Self-contained: a guard
+# failure is swallowed so it can never affect the loop or the main service.
+if [ "${PIN_DRIFT_GUARD:-true}" = "true" ] && \
+   [ -f /opt/dev-brain-shared/scripts/ops/pin_drift_guard.py ]; then
+  echo "Starting hourly pin-drift guard..."
+  (
+    sleep 120   # let boot churn settle before the first check
+    while true; do
+      ( cd /opt/dev-brain-shared && \
+        /opt/hermes-agent/venv/bin/python scripts/ops/pin_drift_guard.py ) \
+        >/tmp/pin-drift-guard.log 2>&1 || true
+      sleep "${PIN_DRIFT_GUARD_INTERVAL:-3600}"
+    done
+  ) &
+else
+  echo "[pin-drift-guard] disabled or script missing; skipping" >&2
+fi
+
 exec python /auth_proxy.py
