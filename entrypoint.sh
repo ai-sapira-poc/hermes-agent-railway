@@ -55,6 +55,27 @@ for agent_dir in /root/.hermes/profiles/agent-*/; do
   fi
 done
 
+# === infra drift guard (pin-drift-guard, B+C) ===================================
+# Hourly: compare the deployed method pin (DEV_BRAIN_METHOD_SHA) to
+# dev-brain-shared main; if main has advanced, open (or reuse) a DEVBRAIN_REF
+# bump PR on this repo and @mention the maintainer. Runs INSIDE this service so
+# it inherits the DEVBRAIN_* App creds + the dev-brain-shared checkout. Fully
+# defensive: a missing script / missing creds / API error only logs and retries
+# next tick -- it can never block boot or crash the container. It NEVER merges or
+# redeploys (opens a reviewable PR only). Disable by setting PIN_DRIFT_GUARD=off.
+if [ "${PIN_DRIFT_GUARD:-on}" != "off" ] \
+   && [ -f /opt/dev-brain-shared/scripts/ops/pin_drift_guard.py ]; then
+  (
+    # small startup delay so the first run doesn't race the gateways
+    sleep 120
+    while true; do
+      python /opt/dev-brain-shared/scripts/ops/pin_drift_guard.py \
+        >/tmp/pin-drift-guard.log 2>&1 || true
+      sleep "${PIN_DRIFT_GUARD_INTERVAL:-3600}"
+    done
+  ) &
+fi
+
 hermes dashboard --host 127.0.0.1 --port 9119 --no-open &
 
 # === infra pin-drift guard (hourly) === runs INSIDE this service so it inherits
