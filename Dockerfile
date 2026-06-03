@@ -33,13 +33,21 @@ ENV PATH="/opt/hermes-agent/venv/bin:$PATH"
 # a self-owned private repo + short-lived token. Pinned for reproducible deploys (A1).
 ARG DEVBRAIN_REF=21aa196e399b7d1137b162f826cc3131217eafb0
 ARG INSTALLATION_ID=137054357
+# Build-time GitHub App creds. Accept both the legacy bare names and the
+# product-prefixed DEVBRAIN_* names (Railway populates ARGs from service
+# vars of the same name). The RUN step below prefers DEVBRAIN_* and falls
+# back to the legacy names, so the build is green during the rename migration
+# regardless of which variable names currently exist in Railway.
 ARG GITHUB_APP_ID
 ARG GITHUB_APP_PRIVATE_KEY
+ARG DEVBRAIN_GITHUB_APP_ID
+ARG DEVBRAIN_GITHUB_APP_PRIVATE_KEY
+ARG DEVBRAIN_INSTALLATION_ID
 COPY mint_build_token.py /tmp/mint_build_token.py
 RUN set -eu; \
     uv venv /tmp/minter --python 3.11; \
     VIRTUAL_ENV=/tmp/minter uv pip install --quiet "pyjwt[crypto]>=2.8"; \
-    TOKEN="$(GITHUB_APP_ID="$GITHUB_APP_ID" GITHUB_APP_PRIVATE_KEY="$GITHUB_APP_PRIVATE_KEY" INSTALLATION_ID="$INSTALLATION_ID" /tmp/minter/bin/python /tmp/mint_build_token.py)"; \
+    TOKEN="$(GITHUB_APP_ID="${DEVBRAIN_GITHUB_APP_ID:-$GITHUB_APP_ID}" GITHUB_APP_PRIVATE_KEY="${DEVBRAIN_GITHUB_APP_PRIVATE_KEY:-$GITHUB_APP_PRIVATE_KEY}" INSTALLATION_ID="${DEVBRAIN_INSTALLATION_ID:-$INSTALLATION_ID}" /tmp/minter/bin/python /tmp/mint_build_token.py)"; \
     git clone "https://x-access-token:${TOKEN}@github.com/ai-sapira-poc/dev-brain-shared.git" /opt/dev-brain-shared; \
     git -C /opt/dev-brain-shared checkout "$DEVBRAIN_REF"; \
     METHOD_SHA="$(git -C /opt/dev-brain-shared rev-parse HEAD)"; \
