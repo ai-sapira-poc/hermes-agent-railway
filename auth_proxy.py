@@ -22,6 +22,16 @@ except Exception as _wh_err:  # noqa: BLE001
     print(f"[webhook] not mounted: {type(_wh_err).__name__}: {_wh_err}", file=sys.stderr)
     attach_webhook = None
 
+# === WEBHOOK MOUNT (Linear ticket trigger) === same defensive contract as the GitHub
+# receiver above: a missing/broken checkout must NOT crash the gateway. If this import
+# fails the Linear webhook simply isn't mounted and the ticket reconciliation cron remains
+# the backstop. Authenticates via Linear-Signature HMAC, not the dashboard cookie.
+try:
+    from webhook.app import attach_linear_webhook
+except Exception as _lin_err:  # noqa: BLE001
+    print(f"[webhook] linear not mounted: {type(_lin_err).__name__}: {_lin_err}", file=sys.stderr)
+    attach_linear_webhook = None
+
 HERMES_HOME = "/root/.hermes"
 UPSTREAM = "http://127.0.0.1:9119"
 USERNAME = os.environ.get("DASHBOARD_USER", "admin")
@@ -286,8 +296,8 @@ async def logout(request):
 
 @web.middleware
 async def auth_middleware(request, handler):
-    # /webhook/github authenticates via GitHub HMAC signature, not the dashboard cookie.
-    if request.path in ("/login", "/logout", "/api/health", "/webhook/github"):
+    # /webhook/github and /webhook/linear authenticate via HMAC signature, not the dashboard cookie.
+    if request.path in ("/login", "/logout", "/api/health", "/webhook/github", "/webhook/linear"):
         return await handler(request)
 
     token = request.cookies.get(COOKIE)
@@ -458,6 +468,12 @@ def create_app():
             attach_webhook(app)
         except Exception as _e:  # noqa: BLE001
             print(f"[webhook] attach failed: {type(_e).__name__}: {_e}", file=sys.stderr)
+    # Linear ticket trigger — POST /webhook/linear, same ordering constraint (before catch-all).
+    if attach_linear_webhook is not None:
+        try:
+            attach_linear_webhook(app)
+        except Exception as _e:  # noqa: BLE001
+            print(f"[webhook] linear attach failed: {type(_e).__name__}: {_e}", file=sys.stderr)
     app.router.add_route("*", "/{path_info:.*}", proxy)
     return app
 
