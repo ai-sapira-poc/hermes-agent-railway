@@ -41,7 +41,12 @@ else
   echo "[seed] seed_profiles.sh not found; skipping (no product agents seeded)" >&2
 fi
 
-# Start an interactive gateway for EACH seeded agent that has a bot token in its
+# This host operates the DGuard product agent: tell the in-process Linear webhook
+# receiver (auth_proxy.py -> webhook.app) to read its HMAC signing secret from the
+# product-namespaced env var, keeping per-product isolation. The receiver defaults to
+# the bare LINEAR_WEBHOOK_SECRET; override only if not already set in the runtime env.
+: "${LINEAR_WEBHOOK_SECRET_ENV:=DGUARD_LINEAR_WEBHOOK_SECRET}"
+export LINEAR_WEBHOOK_SECRET_ENV
 # own .env. Agents without a TELEGRAM_BOT_TOKEN run headless (webhook/cron only).
 # Each gateway runs under that agent's OWN HERMES_HOME -> full memory isolation.
 for agent_dir in /root/.hermes/profiles/agent-*/; do
