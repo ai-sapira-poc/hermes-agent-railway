@@ -31,7 +31,7 @@ ENV PATH="/opt/hermes-agent/venv/bin:$PATH"
 # the token-bearing remote URL. The token lives only in a shell var inside this single RUN.
 # NOTE: ARG values can appear in `docker history` of the intermediate layer; acceptable for
 # a self-owned private repo + short-lived token. Pinned for reproducible deploys (A1).
-ARG DEVBRAIN_REF=f70b5c5a23077c4366d0d606888e283ee1c6d837
+ARG DEVBRAIN_REF=7bb0b47fdc72a31586309e48623aac14fb382602
 ARG INSTALLATION_ID=137054357
 # Build-time GitHub App creds. Accept both the legacy bare names and the
 # product-prefixed DEVBRAIN_* names (Railway populates ARGs from service
