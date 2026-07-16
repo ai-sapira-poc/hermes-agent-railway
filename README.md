@@ -34,6 +34,26 @@ This template goes beyond a basic Hermes deploy:
 
 All other configuration is done through the dashboard after deploy.
 
+### Per-product agent secrets (fleet mode)
+
+Each product agent's credentials are seeded at boot by
+`dev-brain-shared/scripts/deploy/seed_profiles.sh` from the **named** Railway vars
+declared in `dev-brain-shared/configs/products.registry.json`. Per product `<P>`
+(e.g. `DGUARD`, `DEVBRAIN`):
+
+| Variable | Seeded into the agent's `.env` as | Purpose |
+|---|---|---|
+| `<P>_GITHUB_APP_ID` / `_INSTALLATION_ID` / `_APP_PRIVATE_KEY` | `GITHUB_*` | the product's own GitHub App (writes its brain repo only) |
+| `<P>_TELEGRAM_BOT_TOKEN` | `TELEGRAM_BOT_TOKEN` | the product's Telegram bot (optional) |
+| `<P>_SLACK_BOT_TOKEN` / `<P>_SLACK_APP_TOKEN` | `SLACK_BOT_TOKEN` / `SLACK_APP_TOKEN` | the product's own Slack app (optional; channel/user gating comes from the registry's `slack` block) |
+
+**Placement rule:** platform tokens (Slack/Telegram) belong to the **agent
+profiles only** — never to the root `/root/.hermes/.env` on the volume. The
+default gateway spawned by `auth_proxy.py` runs on the root profile; any platform
+token there makes it fight the owning agent's gateway for the scoped platform
+lock (an endless `token already in use … Stop the other gateway first` error loop
+in the service logs).
+
 ## Persistent Storage
 
 To keep your data across redeploys, attach a Railway volume:
