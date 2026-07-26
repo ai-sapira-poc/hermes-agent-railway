@@ -66,12 +66,20 @@ hermes dashboard --host 127.0.0.1 --port 9119 --no-open &
 # the DEVBRAIN_* GitHub App creds, the script, and the right working dir, and
 # survives redeploys (it is baked into the image). It compares the deployed
 # dev-brain-shared pin (DEV_BRAIN_METHOD_SHA) against main HEAD and, when behind,
-# opens a reviewable DEVBRAIN_REF bump PR on hermes-agent-railway. It NEVER merges
-# or redeploys. Disable with PIN_DRIFT_GUARD=off (or =false). Self-contained: a guard
-# failure is swallowed so it can never affect the loop or the main service.
+# opens a DEVBRAIN_REF bump PR on hermes-agent-railway.
+#
+# AUTO-MERGE (this deployment opts in): the guard merges its own bump PR, so an
+# already-reviewed dev-brain-shared main advance deploys without a manual click —
+# Railway redeploys on the resulting push. Safe because the bump PR only changes the
+# one DEVBRAIN_REF line and the content was already reviewed at the dev-brain-shared
+# PR that merged it to main. Turn it back to propose-only with PIN_DRIFT_AUTOMERGE=off.
+# Disable the guard entirely with PIN_DRIFT_GUARD=off. Self-contained: a guard failure
+# is swallowed so it can never affect the loop or the main service.
+: "${PIN_DRIFT_AUTOMERGE:=on}"
+export PIN_DRIFT_AUTOMERGE
 if [ "${PIN_DRIFT_GUARD:-on}" != "off" ] && [ "${PIN_DRIFT_GUARD:-on}" != "false" ] && \
    [ -f /opt/dev-brain-shared/scripts/ops/pin_drift_guard.py ]; then
-  echo "Starting hourly pin-drift guard..."
+  echo "Starting hourly pin-drift guard (auto-merge=${PIN_DRIFT_AUTOMERGE})..."
   (
     sleep 120   # let boot churn settle before the first check
     while true; do
