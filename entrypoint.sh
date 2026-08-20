@@ -41,18 +41,13 @@ else
   echo "[seed] seed_profiles.sh not found; skipping (no product agents seeded)" >&2
 fi
 
-# This host operates the DGuard product agent: tell the in-process Linear webhook
-# receiver (auth_proxy.py -> webhook.app) to read its HMAC signing secret from the
-# product-namespaced env var, keeping per-product isolation. The receiver defaults to
-# the bare LINEAR_WEBHOOK_SECRET; override only if not already set in the runtime env.
-: "${LINEAR_WEBHOOK_SECRET_ENV:=DGUARD_LINEAR_WEBHOOK_SECRET}"
-export LINEAR_WEBHOOK_SECRET_ENV
-# Same indirection for the GITHUB receiver, which never had it: it read the bare
-# GITHUB_WEBHOOK_SECRET, which is not set anywhere on this service (only the namespaced
-# DEVBRAIN_GITHUB_WEBHOOK_SECRET is), so /webhook/github answered EVERY delivery
-# `500 webhook secret not configured` — silently disabling the real-time merged-PR path
-# and leaving the reconciliation cron to carry brain updates alone. Verified against
-# production 2026-08-20: /webhook/github -> 500 while /webhook/linear -> 401.
+# Tell the in-process GitHub webhook receiver (auth_proxy.py -> webhook.app) to read its
+# HMAC signing secret from the product-namespaced env var, keeping per-product isolation.
+# It used to read the bare GITHUB_WEBHOOK_SECRET, which is not set anywhere on this
+# service (only the namespaced DEVBRAIN_GITHUB_WEBHOOK_SECRET is), so /webhook/github
+# answered EVERY delivery `500 webhook secret not configured` — silently disabling the
+# real-time merged-PR path and leaving the reconciliation cron to carry brain updates
+# alone. Verified against production 2026-08-20.
 : "${GITHUB_WEBHOOK_SECRET_ENV:=DEVBRAIN_GITHUB_WEBHOOK_SECRET}"
 export GITHUB_WEBHOOK_SECRET_ENV
 # own .env. Agents without a TELEGRAM_BOT_TOKEN run headless (webhook/cron only).
