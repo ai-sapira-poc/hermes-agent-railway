@@ -47,6 +47,14 @@ fi
 # the bare LINEAR_WEBHOOK_SECRET; override only if not already set in the runtime env.
 : "${LINEAR_WEBHOOK_SECRET_ENV:=DGUARD_LINEAR_WEBHOOK_SECRET}"
 export LINEAR_WEBHOOK_SECRET_ENV
+# Same indirection for the GITHUB receiver, which never had it: it read the bare
+# GITHUB_WEBHOOK_SECRET, which is not set anywhere on this service (only the namespaced
+# DEVBRAIN_GITHUB_WEBHOOK_SECRET is), so /webhook/github answered EVERY delivery
+# `500 webhook secret not configured` — silently disabling the real-time merged-PR path
+# and leaving the reconciliation cron to carry brain updates alone. Verified against
+# production 2026-08-20: /webhook/github -> 500 while /webhook/linear -> 401.
+: "${GITHUB_WEBHOOK_SECRET_ENV:=DEVBRAIN_GITHUB_WEBHOOK_SECRET}"
+export GITHUB_WEBHOOK_SECRET_ENV
 # own .env. Agents without a TELEGRAM_BOT_TOKEN run headless (webhook/cron only).
 # Each gateway runs under that agent's OWN HERMES_HOME -> full memory isolation.
 for agent_dir in /root/.hermes/profiles/agent-*/; do
