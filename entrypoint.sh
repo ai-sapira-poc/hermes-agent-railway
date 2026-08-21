@@ -29,16 +29,22 @@ if [ "$AUTO_UPDATE" = "true" ]; then
   fi
 fi
 
-# === per-product agent seed === materialize one isolated Hermes profile per
-# product (~/.hermes/profiles/agent-<product>) from dev-brain-shared's product
-# registry, BEFORE any gateway/service starts. Idempotent + only-if-absent;
-# non-fatal so a seed failure never blocks the box. Symmetric model: no
-# architect/operator — see dev-brain-shared/AGENTS-TOPOLOGY.md.
-if [ -f /opt/dev-brain-shared/scripts/deploy/seed_profiles.sh ]; then
-  bash /opt/dev-brain-shared/scripts/deploy/seed_profiles.sh || \
-    echo "[seed] agent seed failed (non-fatal); some product agents may be unavailable" >&2
+# === fleet seed === materialize one isolated Hermes profile per ROSTER ENTRY
+# (~/.hermes/profiles/agent-<name>) BEFORE any gateway/service starts. Idempotent +
+# self-correcting; non-fatal so a seed failure never blocks the box.
+#
+# The roster lives in sapira-agent-fleet (who the agents are). PRODUCTS_REGISTRY
+# points at dev-brain-shared's product catalog, which a `kind: product-brain` entry
+# references by product_ref for its credentials and source repos -- the two files
+# are deliberately not merged, because the catalog has six other readers inside
+# dev-brain-shared. See sapira-agent-fleet/FLEET-TOPOLOGY.md.
+export PRODUCTS_REGISTRY="${PRODUCTS_REGISTRY:-/opt/dev-brain-shared/configs/products.registry.json}"
+export FLEET_ROOT="${FLEET_ROOT:-/opt/sapira-agent-fleet}"
+if [ -f "${FLEET_ROOT}/scripts/deploy/seed_profiles.sh" ]; then
+  bash "${FLEET_ROOT}/scripts/deploy/seed_profiles.sh" || \
+    echo "[seed] fleet seed failed (non-fatal); some agents may be unavailable" >&2
 else
-  echo "[seed] seed_profiles.sh not found; skipping (no product agents seeded)" >&2
+  echo "[seed] seed_profiles.sh not found under ${FLEET_ROOT}; skipping (no agents seeded)" >&2
 fi
 
 # Tell the in-process GitHub webhook receiver (auth_proxy.py -> webhook.app) to read its
@@ -50,8 +56,16 @@ fi
 # alone. Verified against production 2026-08-20.
 : "${GITHUB_WEBHOOK_SECRET_ENV:=DEVBRAIN_GITHUB_WEBHOOK_SECRET}"
 export GITHUB_WEBHOOK_SECRET_ENV
-# own .env. Agents without a TELEGRAM_BOT_TOKEN run headless (webhook/cron only).
-# Each gateway runs under that agent's OWN HERMES_HOME -> full memory isolation.
+# own .env. Each gateway runs under that agent's OWN HERMES_HOME -> full memory
+# isolation.
+#
+# A gateway starts for any agent carrying EITHER a Telegram or a Slack bot token.
+# It used to gate on TELEGRAM_BOT_TOKEN alone, which quietly broke Slack-only
+# agents in a way that looks like nothing at all: the cron scheduler lives IN the
+# gateway process, so no gateway means the agent's scheduled jobs never fire -- no
+# error, no log line, just absence. Most utility agents are Slack-first and
+# cron-driven, so that gate would have made them dead on arrival.
+# Agents with neither token still run headless (webhook-only).
 #
 # Their PIDs are collected so term_handler() below can hand each one a SIGTERM.
 # Upstream `hermes gateway run` already installs a SIGTERM handler that refuses new
@@ -64,7 +78,7 @@ GATEWAY_PIDS=()
 for agent_dir in /root/.hermes/profiles/agent-*/; do
   [ -d "$agent_dir" ] || continue
   agent_env="${agent_dir}.env"
-  if [ -f "$agent_env" ] && grep -q '^TELEGRAM_BOT_TOKEN=.\+' "$agent_env"; then
+  if [ -f "$agent_env" ] && grep -qE '^(TELEGRAM|SLACK)_BOT_TOKEN=.+' "$agent_env"; then
     agent_name="$(basename "$agent_dir")"
     echo "Starting gateway for ${agent_name}..."
     HERMES_HOME="${agent_dir%/}" \
@@ -180,7 +194,7 @@ term_handler() {
     kill "$GUARD_PID" 2>/dev/null || true
   fi
   # Every array expansion is guarded by a count check: a headless box (no profile
-  # carries a TELEGRAM_BOT_TOKEN) leaves GATEWAY_PIDS empty, and an empty "${a[@]}"
+  # carries a platform bot token) leaves GATEWAY_PIDS empty, and an empty "${a[@]}"
   # is an unbound-variable error under `set -u`. The drain must not be the thing
   # that breaks a shutdown.
   if [ "${#GATEWAY_PIDS[@]}" -gt 0 ]; then

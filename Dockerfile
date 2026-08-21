@@ -22,16 +22,25 @@ RUN uv venv venv --python 3.11 \
 
 ENV PATH="/opt/hermes-agent/venv/bin:$PATH"
 
-# --- dev-brain-shared: the brain-factory service code (webhook receiver + pipeline). ---
-# dev-brain-shared is a PRIVATE repo. Railway's config-as-code schema does NOT support
+# --- dev-brain-shared (brain-factory service code: webhook receiver + pipeline) ------
+# --- sapira-agent-fleet (the agent roster + the seeding plumbing) -------------------
+# Both are PRIVATE repos. Railway's config-as-code schema does NOT support
 # `build.secrets` (verified: build object has additionalProperties:false, no `secrets`),
 # so BuildKit secret mounts can't be fed here. Instead we pass the GitHub App credentials
 # as build ARGs -- Railway populates ARGs from service variables of the same name. The
 # build mints a short-lived installation token, clones with it, then `rm -rf .git` to drop
 # the token-bearing remote URL. The token lives only in a shell var inside this single RUN.
 # NOTE: ARG values can appear in `docker history` of the intermediate layer; acceptable for
-# a self-owned private repo + short-lived token. Pinned for reproducible deploys (A1).
+# a self-owned private repo + short-lived token. Both pinned for reproducible deploys (A1).
 ARG DEVBRAIN_REF=a5a081a7859e499775a74fa2c19d2c600a47d156
+# sapira-agent-fleet: the agent ROSTER (who the agents are) + the seeding plumbing.
+# A SEPARATE pin from DEVBRAIN_REF on purpose -- a roster change (add an agent, move a
+# channel) must deploy without dragging in every dev-brain-shared commit merged since,
+# and vice versa. Both are bumped by the same guard in the same daily window.
+# Cloned with the SAME installation token as dev-brain-shared, which requires the
+# DEVBRAIN GitHub App to be installed on sapira-agent-fleet as well -- one token, two
+# private repos, no second build credential to manage.
+ARG FLEET_REF=main
 ARG INSTALLATION_ID=137054357
 # Build-time GitHub App creds. Accept both the legacy bare names and the
 # product-prefixed DEVBRAIN_* names (Railway populates ARGs from service
@@ -54,8 +63,15 @@ RUN set -eu; \
     METHOD_VERSION="$(git -C /opt/dev-brain-shared describe --tags --exact-match 2>/dev/null \
                       || git -C /opt/dev-brain-shared describe --tags 2>/dev/null \
                       || echo "$METHOD_SHA")"; \
-    printf 'DEV_BRAIN_METHOD_VERSION=%s\nDEV_BRAIN_METHOD_SHA=%s\n' "$METHOD_VERSION" "$METHOD_SHA" > /opt/method.env; \
-    rm -rf /opt/dev-brain-shared/.git; \
+    git clone "https://x-access-token:${TOKEN}@github.com/ai-sapira-poc/sapira-agent-fleet.git" /opt/sapira-agent-fleet; \
+    git -C /opt/sapira-agent-fleet checkout "$FLEET_REF"; \
+    FLEET_SHA="$(git -C /opt/sapira-agent-fleet rev-parse HEAD)"; \
+    FLEET_VERSION="$(git -C /opt/sapira-agent-fleet describe --tags --exact-match 2>/dev/null \
+                      || git -C /opt/sapira-agent-fleet describe --tags 2>/dev/null \
+                      || echo "$FLEET_SHA")"; \
+    printf 'DEV_BRAIN_METHOD_VERSION=%s\nDEV_BRAIN_METHOD_SHA=%s\nFLEET_VERSION=%s\nFLEET_SHA=%s\n' \
+           "$METHOD_VERSION" "$METHOD_SHA" "$FLEET_VERSION" "$FLEET_SHA" > /opt/method.env; \
+    rm -rf /opt/dev-brain-shared/.git /opt/sapira-agent-fleet/.git; \
     unset TOKEN; \
     rm -rf /tmp/minter /tmp/mint_build_token.py; \
     VIRTUAL_ENV=/opt/hermes-agent/venv uv pip install -r /opt/dev-brain-shared/requirements-service.txt
