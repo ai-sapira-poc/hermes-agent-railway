@@ -52,6 +52,15 @@ fi
 export GITHUB_WEBHOOK_SECRET_ENV
 # own .env. Agents without a TELEGRAM_BOT_TOKEN run headless (webhook/cron only).
 # Each gateway runs under that agent's OWN HERMES_HOME -> full memory isolation.
+#
+# Their PIDs are collected so term_handler() below can hand each one a SIGTERM.
+# Upstream `hermes gateway run` already installs a SIGTERM handler that refuses new
+# work and drains in-flight cron runs (agent.cron_drain_timeout, default 30s) before
+# exiting -- but only if the signal REACHES it. Railway signals PID 1 only, and PID 1
+# used to be auth_proxy (this file ended in `exec`), so these gateways were never
+# signalled at all: every redeploy amputated whatever cron run was mid-flight and the
+# upstream drain never got to run. Collecting the PIDs is what makes it reachable.
+GATEWAY_PIDS=()
 for agent_dir in /root/.hermes/profiles/agent-*/; do
   [ -d "$agent_dir" ] || continue
   agent_env="${agent_dir}.env"
@@ -60,6 +69,7 @@ for agent_dir in /root/.hermes/profiles/agent-*/; do
     echo "Starting gateway for ${agent_name}..."
     HERMES_HOME="${agent_dir%/}" \
       hermes gateway run >"/tmp/${agent_name}-gateway.log" 2>&1 &
+    GATEWAY_PIDS+=("$!")
   fi
 done
 
@@ -80,20 +90,129 @@ hermes dashboard --host 127.0.0.1 --port 9119 --no-open &
 # is swallowed so it can never affect the loop or the main service.
 : "${PIN_DRIFT_AUTOMERGE:=on}"
 export PIN_DRIFT_AUTOMERGE
+
+# CADENCE. The guard used to poll hourly, so every dev-brain-shared merge redeployed
+# this container within the hour: 4-5 full restarts on an active day, each one taking
+# down every agent in the box at an unpredictable moment. Restarts are now BATCHED to
+# one predictable window a day. The cost is stated plainly: the fleet can run up to a
+# day behind dev-brain-shared main. To ship something sooner, run the guard by hand
+# (see docs) or drop PIN_DRIFT_DEPLOY_HOUR for the old interval behaviour.
+#
+#   PIN_DRIFT_DEPLOY_HOUR     UTC hour (0-23) to check+bump at. Empty -> interval mode.
+#   PIN_DRIFT_GUARD_INTERVAL  seconds between checks in interval mode (default 24h).
+#   PIN_DRIFT_BUSY_RETRY      seconds to wait when the guard DEFERRED the bump because
+#                             an agent was mid-run (guard exits 75). Short on purpose:
+#                             a deferred bump must not be parked until tomorrow.
+#
+# Note the window is a wall-clock UTC hour, not "24h since boot": the old interval
+# restarted its clock on every boot, so "hourly" silently meant "hourly since the last
+# redeploy" and the bump time wandered. Anchoring to a UTC hour keeps it where you put it.
+: "${PIN_DRIFT_DEPLOY_HOUR:=4}"
+: "${PIN_DRIFT_GUARD_INTERVAL:=86400}"
+: "${PIN_DRIFT_BUSY_RETRY:=600}"
+
+_seconds_until_hour() {   # seconds from now until the next occurrence of UTC hour $1
+  local target="$1" now secs
+  now=$(( 10#$(date -u +%H) * 3600 + 10#$(date -u +%M) * 60 + 10#$(date -u +%S) ))
+  secs=$(( target * 3600 - now ))
+  if [ "$secs" -le 0 ]; then secs=$(( secs + 86400 )); fi
+  echo "$secs"
+}
+
 if [ "${PIN_DRIFT_GUARD:-on}" != "off" ] && [ "${PIN_DRIFT_GUARD:-on}" != "false" ] && \
    [ -f /opt/dev-brain-shared/scripts/ops/pin_drift_guard.py ]; then
-  echo "Starting hourly pin-drift guard (auto-merge=${PIN_DRIFT_AUTOMERGE})..."
+  if [ -n "$PIN_DRIFT_DEPLOY_HOUR" ]; then
+    echo "Starting pin-drift guard (daily at ${PIN_DRIFT_DEPLOY_HOUR}:00 UTC, auto-merge=${PIN_DRIFT_AUTOMERGE})..."
+  else
+    echo "Starting pin-drift guard (every ${PIN_DRIFT_GUARD_INTERVAL}s, auto-merge=${PIN_DRIFT_AUTOMERGE})..."
+  fi
   (
     sleep 120   # let boot churn settle before the first check
     while true; do
-      ( cd /opt/dev-brain-shared && \
-        /opt/hermes-agent/venv/bin/python scripts/ops/pin_drift_guard.py ) \
-        >/tmp/pin-drift-guard.log 2>&1 || true
-      sleep "${PIN_DRIFT_GUARD_INTERVAL:-3600}"
+      if [ -n "$PIN_DRIFT_DEPLOY_HOUR" ]; then
+        _nap="$(_seconds_until_hour "$PIN_DRIFT_DEPLOY_HOUR")"
+        echo "[pin-drift-guard] next check in ${_nap}s"
+        sleep "$_nap"
+      fi
+      if ( cd /opt/dev-brain-shared && \
+           /opt/hermes-agent/venv/bin/python scripts/ops/pin_drift_guard.py ) \
+           >/tmp/pin-drift-guard.log 2>&1; then
+        _rc=0
+      else
+        _rc=$?
+      fi
+      if [ "$_rc" -eq 75 ]; then
+        # EX_TEMPFAIL: the guard found agents mid-run and declined to deploy on top of
+        # live work. Come back soon rather than waiting for the next daily window.
+        echo "[pin-drift-guard] bump deferred (agents busy); retrying in ${PIN_DRIFT_BUSY_RETRY}s"
+        sleep "$PIN_DRIFT_BUSY_RETRY"
+      elif [ -z "$PIN_DRIFT_DEPLOY_HOUR" ]; then
+        sleep "$PIN_DRIFT_GUARD_INTERVAL"
+      fi
     done
   ) &
+  GUARD_PID=$!
 else
   echo "[pin-drift-guard] disabled or script missing; skipping" >&2
 fi
 
-exec python /auth_proxy.py
+# === graceful shutdown ===============================================================
+# auth_proxy runs as a CHILD (it used to be `exec`d) so this shell stays PID 1 and can
+# fan the platform's stop signal out to everything else in the box. Order matters:
+# the pin-drift guard dies first (a container on its way out must never open or merge
+# a bump PR), then the gateways get the SIGTERM that lets them run their own in-flight
+# cron drain, and only then does the web tier go.
+#
+# HERMES_DRAIN_TIMEOUT bounds how long we wait for the gateways. The gateway's own cron
+# drain is ~30s (agent.cron_drain_timeout, itself clamped by hermes's shutdown watchdog),
+# so waiting much past that buys nothing. Be clear-eyed about what this does and does
+# not do: the whole handler runs inside the PLATFORM's stop grace period, so if Railway
+# SIGKILLs first the drain is simply cut short. Draining is what saves SHORT jobs. A
+# brain update runs for minutes and will still be interrupted -- what protects THAT is
+# being resumable (dev-brain-shared reconcile advances its watermark only after the
+# brain-update PR is settled), not being waited for.
+: "${HERMES_DRAIN_TIMEOUT:=25}"
+
+term_handler() {
+  trap '' TERM INT          # ignore repeat signals while draining
+  echo "[drain] stop requested -- draining ${#GATEWAY_PIDS[@]} gateway(s), budget ${HERMES_DRAIN_TIMEOUT}s"
+  if [ -n "${GUARD_PID:-}" ]; then
+    kill "$GUARD_PID" 2>/dev/null || true
+  fi
+  # Every array expansion is guarded by a count check: a headless box (no profile
+  # carries a TELEGRAM_BOT_TOKEN) leaves GATEWAY_PIDS empty, and an empty "${a[@]}"
+  # is an unbound-variable error under `set -u`. The drain must not be the thing
+  # that breaks a shutdown.
+  if [ "${#GATEWAY_PIDS[@]}" -gt 0 ]; then
+    for _pid in "${GATEWAY_PIDS[@]}"; do
+      if [ -n "$_pid" ]; then kill -TERM "$_pid" 2>/dev/null || true; fi
+    done
+  fi
+  _waited=0
+  _alive=0
+  while [ "$_waited" -lt "$HERMES_DRAIN_TIMEOUT" ]; do
+    _alive=0
+    if [ "${#GATEWAY_PIDS[@]}" -gt 0 ]; then
+      for _pid in "${GATEWAY_PIDS[@]}"; do
+        if [ -n "$_pid" ] && kill -0 "$_pid" 2>/dev/null; then _alive=$(( _alive + 1 )); fi
+      done
+    fi
+    if [ "$_alive" -eq 0 ]; then break; fi
+    sleep 1
+    _waited=$(( _waited + 1 ))
+  done
+  if [ "$_alive" -gt 0 ]; then
+    echo "[drain] ${_alive} gateway(s) still busy after ${_waited}s -- the container stop will kill them" >&2
+  else
+    echo "[drain] gateways exited cleanly after ${_waited}s"
+  fi
+  kill -TERM "$MAIN_PID" 2>/dev/null || true
+  wait "$MAIN_PID" 2>/dev/null || true
+  exit 0
+}
+trap term_handler TERM INT
+
+python /auth_proxy.py &
+MAIN_PID=$!
+wait "$MAIN_PID" || MAIN_RC=$?
+exit "${MAIN_RC:-0}"
