@@ -40,7 +40,15 @@ ARG DEVBRAIN_REF=a5a081a7859e499775a74fa2c19d2c600a47d156
 # Cloned with the SAME installation token as dev-brain-shared, which requires the
 # DEVBRAIN GitHub App to be installed on sapira-agent-fleet as well -- one token, two
 # private repos, no second build credential to manage.
-ARG FLEET_REF=main
+# Pinned to the roster the box is ACTUALLY running (built 2026-08-21 14:28 UTC).
+# It shipped as `main`, on the theory that the pin guard would rewrite it to a SHA
+# on its first run. It would not have: the guard only rewrites an ARG it finds
+# DRIFTED, and a deployed FLEET_SHA taken from `main` at build time always equals
+# `main` at compare time, so it reads as in-sync forever. The floating ref meant any
+# rebuild -- a DEVBRAIN_REF bump, say -- silently picked up whatever roster had been
+# merged since, deploying it without the bump PR that is supposed to record when a
+# roster change goes live. From here normal drift handling applies.
+ARG FLEET_REF=d18a3c1cc1877f84f27fcfbba0dc9973315f155f
 ARG INSTALLATION_ID=137054357
 # Build-time GitHub App creds. Accept both the legacy bare names and the
 # product-prefixed DEVBRAIN_* names (Railway populates ARGs from service
