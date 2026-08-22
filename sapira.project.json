@@ -1,0 +1,9 @@
+{
+  "tier": "production",
+  "operating_model": "sapira-operated",
+  "stack": {
+    "backend": "other",
+    "platform": "railway"
+  },
+  "deviations": []
+}
