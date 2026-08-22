@@ -48,13 +48,25 @@ else
 fi
 
 # Tell the in-process GitHub webhook receiver (auth_proxy.py -> webhook.app) to read its
-# HMAC signing secret from the product-namespaced env var, keeping per-product isolation.
+# HMAC signing secret from the product-namespaced env vars, keeping per-product isolation.
 # It used to read the bare GITHUB_WEBHOOK_SECRET, which is not set anywhere on this
 # service (only the namespaced DEVBRAIN_GITHUB_WEBHOOK_SECRET is), so /webhook/github
 # answered EVERY delivery `500 webhook secret not configured` — silently disabling the
 # real-time merged-PR path and leaving the reconciliation cron to carry brain updates
 # alone. Verified against production 2026-08-20.
-: "${GITHUB_WEBHOOK_SECRET_ENV:=DEVBRAIN_GITHUB_WEBHOOK_SECRET}"
+#
+# ONE NAME PER GITHUB APP, comma-separated: the receiver tries the signature against every
+# secret that resolves and any match verifies. Each App therefore keeps its own key —
+# sharing one across Apps would also work, and would mean compromising any one of them
+# lets an attacker forge deliveries for all. A name whose variable is unset is skipped, so
+# listing an App before its secret is provisioned costs nothing: that App's deliveries are
+# rejected 401 until the value lands, and every other App keeps working. Only when NONE of
+# the names resolve is it a 500 — the misconfiguration answer, distinct from a rejection.
+#
+# NOTE: this file is the IMAGE, so no DEVBRAIN_REF/FLEET_REF pin bump can deliver a change
+# here. It ships when this repo redeploys, which is why the multi-secret receiver in
+# dev-brain-shared and this line are two separate PRs that must both land.
+: "${GITHUB_WEBHOOK_SECRET_ENV:=DEVBRAIN_GITHUB_WEBHOOK_SECRET,STANDARDS_GITHUB_WEBHOOK_SECRET}"
 export GITHUB_WEBHOOK_SECRET_ENV
 # own .env. Each gateway runs under that agent's OWN HERMES_HOME -> full memory
 # isolation.
