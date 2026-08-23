@@ -32,7 +32,7 @@ ENV PATH="/opt/hermes-agent/venv/bin:$PATH"
 # the token-bearing remote URL. The token lives only in a shell var inside this single RUN.
 # NOTE: ARG values can appear in `docker history` of the intermediate layer; acceptable for
 # a self-owned private repo + short-lived token. Both pinned for reproducible deploys (A1).
-ARG DEVBRAIN_REF=603b6572613e9598a4260c8288938cd0b4bc74f6
+ARG DEVBRAIN_REF=1bc80a8dccfa040863493a2b6b693bf634b912e7
 # sapira-agent-fleet: the agent ROSTER (who the agents are) + the seeding plumbing.
 # A SEPARATE pin from DEVBRAIN_REF on purpose -- a roster change (add an agent, move a
 # channel) must deploy without dragging in every dev-brain-shared commit merged since,
@@ -40,15 +40,16 @@ ARG DEVBRAIN_REF=603b6572613e9598a4260c8288938cd0b4bc74f6
 # Cloned with the SAME installation token as dev-brain-shared, which requires the
 # DEVBRAIN GitHub App to be installed on sapira-agent-fleet as well -- one token, two
 # private repos, no second build credential to manage.
-# Pinned to the roster the box is ACTUALLY running (built 2026-08-21 14:28 UTC).
-# It shipped as `main`, on the theory that the pin guard would rewrite it to a SHA
-# on its first run. It would not have: the guard only rewrites an ARG it finds
+# HISTORY, kept because it explains why this ARG is watched at all. The pin first
+# shipped on 2026-08-21 as the literal string `main`.
+# That was on the theory that the pin guard would rewrite it to a SHA on its first
+# run. It would not have: the guard only rewrites an ARG it finds
 # DRIFTED, and a deployed FLEET_SHA taken from `main` at build time always equals
 # `main` at compare time, so it reads as in-sync forever. The floating ref meant any
 # rebuild -- a DEVBRAIN_REF bump, say -- silently picked up whatever roster had been
 # merged since, deploying it without the bump PR that is supposed to record when a
 # roster change goes live. From here normal drift handling applies.
-ARG FLEET_REF=a555c46e6200b0aec4a1dad897c742f310587dc5
+ARG FLEET_REF=4cca8515e173c23b3b1786434aeb78a273717d48
 ARG INSTALLATION_ID=137054357
 # Build-time GitHub App creds. Accept both the legacy bare names and the
 # product-prefixed DEVBRAIN_* names (Railway populates ARGs from service
