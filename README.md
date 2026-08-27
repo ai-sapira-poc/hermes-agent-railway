@@ -31,6 +31,7 @@ This template goes beyond a basic Hermes deploy:
 | `DASHBOARD_USER` | Login username (default: `admin`) |
 | `DASHBOARD_PASSWORD` | Login password (**required** — deploy will fail without it) |
 | `AUTO_UPDATE` | Pull latest Hermes on every restart (default: `true`, set to `false` to pin version) |
+| `GATEWAY_ONLINE_NOTICE` | Post "♻️ Gateway online — Hermes is back and ready." to each agent's home channel after a redeploy (default: `on`). The matching "⚠️ Gateway shutting down" notice is upstream's and always fires; this is what makes the pair complete. Set to `off` for quiet redeploys. |
 
 All other configuration is done through the dashboard after deploy.
 

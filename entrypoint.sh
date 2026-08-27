@@ -86,12 +86,57 @@ export GITHUB_WEBHOOK_SECRET_ENV
 # used to be auth_proxy (this file ended in `exec`), so these gateways were never
 # signalled at all: every redeploy amputated whatever cron run was mid-flight and the
 # upstream drain never got to run. Collecting the PIDs is what makes it reachable.
+
+# === "back online" notice ============================================================
+# The channels already get "⚠️ Gateway shutting down — Your current task will be
+# interrupted." on every redeploy, and then silence. The half that says it came back was
+# never reached, and the absence reads exactly like an agent that did not survive.
+#
+# Upstream already knows how to say it. `gateway/run.py` sends
+#     ♻️ Gateway online — Hermes is back and ready.
+# to every platform's home channel during startup -- but only when it finds
+# <HERMES_HOME>/.restart_pending.json, a marker the gateway writes for ITSELF, on its way
+# out, when it planned its own restart (`_restart_requested`: a /restart command, say).
+#
+# A Railway redeploy is not that. The platform SIGTERMs this container and starts a NEW
+# one; the process that boots never planned anything and has nothing on disk saying so.
+# The notice is not missing, it is unreachable — which is why enabling a setting was never
+# going to fix it.
+#
+# So we drop the marker ourselves, per profile, before that profile's gateway starts.
+# Everything after that is upstream's: it honours each platform's `home_channel` and its
+# `gateway_restart_notification` flag, covers Slack and Telegram alike without this file
+# knowing either API or holding either token, and unlinks the marker in a `finally` once
+# the send is attempted -- so a failed send cannot leave a box that announces itself on
+# every boot forever.
+#
+# Turn it off with GATEWAY_ONLINE_NOTICE=off.
+: "${GATEWAY_ONLINE_NOTICE:=on}"
+
+arm_online_notice() {  # arm_online_notice <profile-dir>
+  [ "${GATEWAY_ONLINE_NOTICE}" = "on" ] || return 0
+  _home="${1%/}"
+  [ -d "$_home" ] || return 0
+  # The same shape upstream writes (atomic_json_write, compact, no indent). Only the
+  # file's EXISTENCE is read today -- `_planned_restart_notification_pending()` is an
+  # `.exists()` check and nothing parses the body -- but valid JSON costs one printf and
+  # survives upstream deciding to read a field out of it.
+  # The braces matter. `printf ... > file 2>/dev/null` does NOT silence a failing
+  # redirect: redirections are set up left to right, so `> file` has already failed and
+  # printed to the real stderr by the time `2>/dev/null` is applied. On a read-only
+  # profile that put a bare "Permission denied" in the boot log, which is a line somebody
+  # investigates. Grouping puts the redirect inside the silenced region.
+  { printf '{"requested_at":%s,"via_service":true,"detached":false}' "$(date +%s)" \
+      > "${_home}/.restart_pending.json"; } 2>/dev/null || true
+}
+
 GATEWAY_PIDS=()
 for agent_dir in /root/.hermes/profiles/agent-*/; do
   [ -d "$agent_dir" ] || continue
   agent_env="${agent_dir}.env"
   if [ -f "$agent_env" ] && grep -qE '^(TELEGRAM|SLACK)_BOT_TOKEN=.+' "$agent_env"; then
     agent_name="$(basename "$agent_dir")"
+    arm_online_notice "$agent_dir"
     echo "Starting gateway for ${agent_name}..."
     HERMES_HOME="${agent_dir%/}" \
       hermes gateway run >"/tmp/${agent_name}-gateway.log" 2>&1 &

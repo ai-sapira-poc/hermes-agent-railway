@@ -16,9 +16,10 @@ check() {  # check <name> <condition-result>
   else printf '  FAIL  %s\n' "$1"; fails=$(( fails + 1 )); fi
 }
 
-# Pull the two functions out of the real entrypoint and into this shell.
+# Pull the functions out of the real entrypoint and into this shell.
 eval "$(sed -n '/^_seconds_until_hour()/,/^}/p' "$ENTRYPOINT")"
 eval "$(sed -n '/^term_handler()/,/^}/p' "$ENTRYPOINT")"
+eval "$(sed -n '/^arm_online_notice()/,/^}/p' "$ENTRYPOINT")"
 
 echo "_seconds_until_hour"
 [ "$(type -t _seconds_until_hour)" = "function" ]; check "extracted from entrypoint.sh" $?
@@ -81,6 +82,43 @@ start=$(date +%s)
 elapsed=$(( $(date +%s) - start ))
 [ "$rc" = "0" ]; check "empty gateway list is not an error" $?
 [ "$elapsed" -le 1 ]; check "returns immediately, no idle wait" $?
+
+echo
+echo "arm_online_notice — the marker upstream needs to say it is back"
+[ "$(type -t arm_online_notice)" = "function" ]; check "extracted from entrypoint.sh" $?
+notice_home="$(mktemp -d)/agent-x"
+mkdir -p "$notice_home"
+marker="$notice_home/.restart_pending.json"
+
+GATEWAY_ONLINE_NOTICE=on
+arm_online_notice "$notice_home/"          # called with the loop's trailing slash
+[ -f "$marker" ]; check "marker written where the gateway looks (HERMES_HOME root)" $?
+# Only .exists() is read today, but a body that is not JSON is a trap for whoever
+# starts parsing it. Python is in the image; if it is not here, do not fail the suite.
+if command -v python3 >/dev/null 2>&1; then
+  python3 -c "import json,sys;d=json.load(open(sys.argv[1]));assert d['requested_at']>0" "$marker"
+  check "body is valid JSON in upstream's shape" $?
+fi
+
+rm -f "$marker"
+GATEWAY_ONLINE_NOTICE=off
+arm_online_notice "$notice_home/"
+[ ! -f "$marker" ]; check "GATEWAY_ONLINE_NOTICE=off writes nothing" $?
+
+# The loop hands this every profile it finds. A path that is not there must be a quiet
+# no-op, not a failure that takes the gateway launch down with it -- `set -e` is on.
+GATEWAY_ONLINE_NOTICE=on
+( set -e; arm_online_notice "/nonexistent/agent-nope/" ); check "a missing profile dir is a no-op, not an error" $?
+( set -e; arm_online_notice "" ); check "an empty path is a no-op, not an error" $?
+
+# An unwritable profile must not stop the box booting either: the notice is a courtesy.
+chmod 500 "$notice_home"
+noise="$( ( set -e; arm_online_notice "$notice_home/" ) 2>&1 )"; rc=$?
+[ "$rc" = "0" ]; check "an unwritable profile is survivable" $?
+# ...and SILENT. A bare "Permission denied" in a boot log is a line somebody investigates.
+[ -z "$noise" ]; check "and says nothing to the boot log while failing" $?
+chmod 700 "$notice_home"
+rm -rf "$(dirname "$notice_home")"
 
 rm -rf "$tmp"
 echo
