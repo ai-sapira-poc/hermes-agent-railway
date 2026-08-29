@@ -32,7 +32,7 @@ ENV PATH="/opt/hermes-agent/venv/bin:$PATH"
 # the token-bearing remote URL. The token lives only in a shell var inside this single RUN.
 # NOTE: ARG values can appear in `docker history` of the intermediate layer; acceptable for
 # a self-owned private repo + short-lived token. Both pinned for reproducible deploys (A1).
-ARG DEVBRAIN_REF=eddecce5ae6cd7a5f2bf0df2a2da7d964ff24842
+ARG DEVBRAIN_REF=eb7f6eadbeb87fabcd745bd2fc1805a0d3dfcad3
 # sapira-agent-fleet: the agent ROSTER (who the agents are) + the seeding plumbing.
 # A SEPARATE pin from DEVBRAIN_REF on purpose -- a roster change (add an agent, move a
 # channel) must deploy without dragging in every dev-brain-shared commit merged since,
@@ -49,7 +49,7 @@ ARG DEVBRAIN_REF=eddecce5ae6cd7a5f2bf0df2a2da7d964ff24842
 # rebuild -- a DEVBRAIN_REF bump, say -- silently picked up whatever roster had been
 # merged since, deploying it without the bump PR that is supposed to record when a
 # roster change goes live. From here normal drift handling applies.
-ARG FLEET_REF=725cc6f348e2bf08be9c64496ae63637e70bb5fe
+ARG FLEET_REF=73bb120988991dabec187c699350605fc532dff1
 ARG INSTALLATION_ID=137054357
 # Build-time GitHub App creds. Accept both the legacy bare names and the
 # product-prefixed DEVBRAIN_* names (Railway populates ARGs from service
