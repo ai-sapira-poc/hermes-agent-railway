@@ -17,7 +17,23 @@ if [ -f /opt/method.env ]; then
   done < /opt/method.env
 fi
 
-if [ "$AUTO_UPDATE" = "true" ]; then
+# THE PIN WINS over AUTO_UPDATE, and says so out loud rather than quietly doing nothing.
+#
+# AUTO_UPDATE=true is set on this service and predates the pin. It ran `git pull` on every
+# container start, which meant the deployed runtime was not the image's runtime: a restart
+# at 03:00 and a restart at 15:00 could be running different Hermes code from the SAME
+# image, with no deploy, no diff and no record. That is worse than an unpinned build,
+# because a build at least leaves a Railway entry behind.
+#
+# It would also now simply FAIL: /opt/hermes-agent is a shallow, detached-HEAD checkout
+# with no tracking branch for `git pull` to follow. Failing quietly into a reinstall is
+# not a behaviour to leave standing on the start path of every agent on the box.
+#
+# To move the runtime, bump HERMES_REF in the Dockerfile. To go back to floating, unset
+# the pin -- not AUTO_UPDATE.
+if [ "$AUTO_UPDATE" = "true" ] && [ -n "${HERMES_SHA:-}" ]; then
+  echo "AUTO_UPDATE=true ignored: Hermes runtime is pinned to ${HERMES_SHA} (Dockerfile HERMES_REF)."
+elif [ "$AUTO_UPDATE" = "true" ]; then
   echo "Checking for Hermes updates..."
   cd /opt/hermes-agent
   if git pull --recurse-submodules 2>&1 | grep -v 'Already up to date'; then

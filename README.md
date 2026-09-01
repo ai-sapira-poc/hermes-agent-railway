@@ -12,7 +12,7 @@ This template goes beyond a basic Hermes deploy:
 - **Messaging gateway included** — Telegram, Discord, and Slack bots run alongside the dashboard. Configure platform tokens in the UI, hit restart, and your bot is live.
 - **Gateway management widget** — a floating status indicator and restart button injected into the dashboard. See at a glance if the gateway is running, restart it after config changes without redeploying.
 - **Cookie-based auth** — password-protected login page with session cookies. No repeated browser auth prompts like basic auth templates.
-- **Auto-updates** — pulls the latest Hermes release on every container restart. Always up to date, no manual intervention. Disable with `AUTO_UPDATE=false` to pin a version.
+- **Pinned runtime** — the Hermes version is pinned in the Dockerfile (`HERMES_REF`), alongside the `DEVBRAIN_REF` and `FLEET_REF` pins, so the same image always runs the same agent runtime. Bump the pin to upgrade. `AUTO_UPDATE` is ignored while the pin is set.
 - **Zero config to start** — deploy with just a password, then set up everything else (LLM provider, API keys, messaging platforms) from the dashboard UI.
 - **Persistent storage** — attach a Railway volume to keep sessions, memories, config, and logs across redeploys.
 
@@ -30,7 +30,7 @@ This template goes beyond a basic Hermes deploy:
 |---|---|
 | `DASHBOARD_USER` | Login username (default: `admin`) |
 | `DASHBOARD_PASSWORD` | Login password (**required** — deploy will fail without it) |
-| `AUTO_UPDATE` | Pull latest Hermes on every restart (default: `true`, set to `false` to pin version) |
+| `AUTO_UPDATE` | Pull latest Hermes on every restart (default: `true`). **Ignored while `HERMES_REF` is pinned** — the entrypoint logs that it skipped, and the runtime moves only when the pin does. |
 | `GATEWAY_ONLINE_NOTICE` | Post "♻️ Gateway online — Hermes is back and ready." to each agent's home channel after a redeploy (default: `on`). The matching "⚠️ Gateway shutting down" notice is upstream's and always fires; this is what makes the pair complete. Set to `off` for quiet redeploys. |
 
 All other configuration is done through the dashboard after deploy.

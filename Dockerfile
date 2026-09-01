@@ -14,7 +14,49 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/root/.local/bin:$PATH"
 
-RUN git clone --recurse-submodules https://github.com/NousResearch/hermes-agent.git /opt/hermes-agent
+# --- upstream Hermes: the RUNTIME every agent on this box actually executes ----------
+# PINNED, and it is the last of the three clones to become so. DEVBRAIN_REF and FLEET_REF
+# below were pinned for reproducible deploys; the runtime underneath them floated on
+# whatever NousResearch had merged by build time -- so an unrelated DEVBRAIN_REF bump
+# could change the agent runtime with nothing in the diff to say so. That is the same
+# failure the FLEET_REF history note further down records having already been bitten by,
+# one layer lower and harder to see.
+#
+# CHOSEN SHA: main's HEAD at the 2026-09-01 04:00Z build, which is what production has
+# been running since. This pin is therefore a NO-OP at deploy time by construction -- it
+# freezes the float, it does not perform an upgrade. Bump it deliberately, in its own PR.
+#
+# NOT a release tag, though upstream publishes them (vX.Y.Z) and a tag would build much
+# faster -- see the fetch note below. The newest tag at time of writing, v2026.8.31, is 95
+# commits BEHIND this SHA, so adopting it here would be a silent 95-commit rollback of a
+# runtime that has been serving fine. A tag is the better pin the day upstream cuts one at
+# or past what we are already running; it is not worth a rollback to get there.
+ARG HERMES_REF=21b2095d00a98b8ad7b5c60b10587619c852cdb8
+
+# SHALLOW, and FETCHED BY SHA rather than cloned. Upstream is ~810MB of history over an
+# UNAUTHENTICATED connection: it took 5m37s and then earned an HTTP 429 from GitHub on
+# 2026-09-01, failing a build for a reason that had no cause anywhere in this repo.
+# `--depth 1` is the fix, and `git clone --depth 1` cannot take a SHA -- hence init +
+# fetch, which GitHub serves for an arbitrary SHA.
+#
+# MEASURED 2026-09-01, and the shape of the win is worth knowing before someone "optimises"
+# this: the shallow fetch moves 68MB against ~810MB for the full clone, a ~12x cut in bytes
+# and so in rate-limit exposure, which is the failure this is here to prevent. Wall clock
+# improves far less -- 2m23s against the 5m37s the failing clone had burned -- because
+# almost all of it is GitHub computing a pack for a mid-history SHA, not transfer (68MB
+# arrived in ~4s). The same shallow fetch of a TAG takes 18s, since a ref is served from a
+# precomputed pack. That gap is the real argument for moving to tags later.
+#
+# `--recurse-submodules` is dropped with nothing lost: upstream carries no .gitmodules, so
+# the flag has been a no-op. Restore it (and --shallow-submodules) if that ever changes.
+#
+# .git is deliberately KEPT, unlike the two private clones below, whose .git is removed to
+# drop a token-bearing remote URL. There is no token here, and the method.env step reads
+# rev-parse out of it.
+RUN git init -q /opt/hermes-agent \
+    && git -C /opt/hermes-agent remote add origin https://github.com/NousResearch/hermes-agent.git \
+    && git -C /opt/hermes-agent fetch -q --depth 1 origin "$HERMES_REF" \
+    && git -C /opt/hermes-agent checkout -q FETCH_HEAD
 
 WORKDIR /opt/hermes-agent
 RUN uv venv venv --python 3.11 \
@@ -78,8 +120,9 @@ RUN set -eu; \
     FLEET_VERSION="$(git -C /opt/sapira-agent-fleet describe --tags --exact-match 2>/dev/null \
                       || git -C /opt/sapira-agent-fleet describe --tags 2>/dev/null \
                       || echo "$FLEET_SHA")"; \
-    printf 'DEV_BRAIN_METHOD_VERSION=%s\nDEV_BRAIN_METHOD_SHA=%s\nFLEET_VERSION=%s\nFLEET_SHA=%s\n' \
-           "$METHOD_VERSION" "$METHOD_SHA" "$FLEET_VERSION" "$FLEET_SHA" > /opt/method.env; \
+    HERMES_SHA="$(git -C /opt/hermes-agent rev-parse HEAD)"; \
+    printf 'DEV_BRAIN_METHOD_VERSION=%s\nDEV_BRAIN_METHOD_SHA=%s\nFLEET_VERSION=%s\nFLEET_SHA=%s\nHERMES_SHA=%s\n' \
+           "$METHOD_VERSION" "$METHOD_SHA" "$FLEET_VERSION" "$FLEET_SHA" "$HERMES_SHA" > /opt/method.env; \
     rm -rf /opt/dev-brain-shared/.git /opt/sapira-agent-fleet/.git; \
     unset TOKEN; \
     rm -rf /tmp/minter /tmp/mint_build_token.py; \
