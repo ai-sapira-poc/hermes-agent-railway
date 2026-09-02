@@ -15,11 +15,11 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/root/.local/bin:$PATH"
 
 # --- upstream Hermes: the RUNTIME every agent on this box actually executes ----------
-# PINNED, and it is the last of the three clones to become so. DEVBRAIN_REF and FLEET_REF
+# PINNED, and it is the last of the three clones to become so. DEVBRAIN_REF 606502e8dbe324c1d58253106c6958472a66c095 FLEET_REF
 # below were pinned for reproducible deploys; the runtime underneath them floated on
 # whatever NousResearch had merged by build time -- so an unrelated DEVBRAIN_REF bump
 # could change the agent runtime with nothing in the diff to say so. That is the same
-# failure the FLEET_REF history note further down records having already been bitten by,
+# failure the FLEET_REF 9afdca50977555393e9df6645ddfd251b44c6a1a note further down records having already been bitten by,
 # one layer lower and harder to see.
 #
 # CHOSEN SHA: main's HEAD at the 2026-09-01 04:00Z build, which is what production has
