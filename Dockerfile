@@ -19,7 +19,7 @@ ENV PATH="/root/.local/bin:$PATH"
 # below were pinned for reproducible deploys; the runtime underneath them floated on
 # whatever NousResearch had merged by build time -- so an unrelated DEVBRAIN_REF bump
 # could change the agent runtime with nothing in the diff to say so. That is the same
-# failure the FLEET_REF 9afdca50977555393e9df6645ddfd251b44c6a1a note further down records having already been bitten by,
+# failure the FLEET_REF 64bc2c6adeff5b37c9226344418a6bd6e7143df3 note further down records having already been bitten by,
 # one layer lower and harder to see.
 #
 # CHOSEN SHA: main's HEAD at the 2026-09-01 04:00Z build, which is what production has
