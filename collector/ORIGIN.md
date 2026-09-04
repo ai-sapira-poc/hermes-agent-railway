@@ -11,7 +11,14 @@ this file is the only obligation a blueprint carries. Divergence is expected and
 source version it came from. A blueprint may go stale; a redaction pattern may not, and this stamp
 is what makes a pattern update a push to this deployment rather than something the copy misses.
 
-- Redaction patterns from `@ai-sapira/otel-redaction` version: `0.1.0`
+- Redaction patterns from `@ai-sapira/otel-redaction` version: `0.2.0`
+
+**Why this stamp earned its keep, 2026-09-04.** At `0.1.0` this file recorded a version for a block
+that had been pasted incomplete: the generator emits `redaction/secrets` *and* `transform/mask-values`,
+and only the first was here. The stamp is what made it a one-line question -- diff what 0.1.0
+generates against what this file contains -- rather than a reading of the whole config. A stamp that
+records a version does not by itself prove the copy is faithful to it; see
+`acceptance/credential-in-url.sh`, which does.
 
 ## Divergence worth pushing back
 
