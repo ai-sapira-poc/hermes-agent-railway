@@ -191,7 +191,24 @@ if [ "${HERMES_OTEL}" = "on" ]; then
     # is the opposite one: an engagement that enables capture with `true` gets no content
     # and a warning nobody reads. Set explicitly, because a default is a thing a version
     # bump can change and this one decides what personal data leaves the box.
-    export OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT="${OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT:-NO_CONTENT}"
+    : "${OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT:=NO_CONTENT}"
+    case "${OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT}" in
+      NO_CONTENT|SPAN_ONLY|EVENT_ONLY|SPAN_AND_EVENT) ;;
+      *)
+        # The failure this catches: someone writes `true`, expecting capture, gets a warning in a
+        # log nobody reads and NO_CONTENT in the store, and finds out months later when an
+        # engagement asks where their content went.
+        #
+        # It DISARMS telemetry rather than exiting. Six live agents must not go down over a
+        # telemetry variable, and there is no unsafe direction to protect against here: an invalid
+        # value can only ever under-capture, never over-capture. So the loud thing to do is refuse
+        # to produce telemetry whose content policy nobody has actually stated.
+        echo "ERROR: OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT='${OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT}' is not one of NO_CONTENT | SPAN_ONLY | EVENT_ONLY | SPAN_AND_EVENT." >&2
+        echo "ERROR: it is NOT a boolean -- 'true' silently yields NO_CONTENT. Telemetry DISARMED; agents continue uninstrumented." >&2
+        OTEL_WRAP=""
+        ;;
+    esac
+    export OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT
 
     # The build stamps already in /opt/method.env, as resource attributes, so a span can
     # be traced back to the exact image that produced it.
