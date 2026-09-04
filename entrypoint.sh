@@ -177,7 +177,15 @@ if [ "${HERMES_OTEL}" = "on" ]; then
     export OTEL_EXPORTER_OTLP_PROTOCOL="${OTEL_EXPORTER_OTLP_PROTOCOL:-http/protobuf}"
     export OTEL_EXPORTER_OTLP_ENDPOINT="${OTEL_EXPORTER_OTLP_ENDPOINT:-http://collector.railway.internal:4318}"
     export OTEL_TRACES_EXPORTER="${OTEL_TRACES_EXPORTER:-otlp}"
-    export OTEL_METRICS_EXPORTER="${OTEL_METRICS_EXPORTER:-otlp}"
+    # NONE, because there is nowhere to put them. ENG-ADR-0007 chose Phoenix, and Phoenix is a
+    # TRACE store: it answers /v1/metrics with 405, so every metrics batch was exported, refused,
+    # and dropped -- 35 points in the first four minutes after arming. A permanent error loop is
+    # worse than no metrics, because it buries the errors that matter.
+    #
+    # ENG-STD-0018 covers metrics and ENG-STD-0020 §2 gives them a 90-day floor, so this is an
+    # OPEN DECISION, not a closed one: D8 picked a trace store and nothing has picked a metrics
+    # store. Flip this to `otlp` the day something can receive them.
+    export OTEL_METRICS_EXPORTER="${OTEL_METRICS_EXPORTER:-none}"
     # Logs stay off. ENG-STD-0018 is about traces and metrics; piping this box's logs
     # through the same door is a separate decision with a separate retention answer.
     export OTEL_LOGS_EXPORTER="${OTEL_LOGS_EXPORTER:-none}"

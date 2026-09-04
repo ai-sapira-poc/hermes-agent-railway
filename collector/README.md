@@ -25,6 +25,7 @@ hermes ──OTLP──▶ collector ──▶ Phoenix
 | **Image** | `otel/opentelemetry-collector-contrib:0.160.0` — pinned, bumped deliberately |
 | **Persistent state** | **None.** The collector buffers in memory and forwards; a restart loses at most one batch. Nothing here is worth a volume, and that is a property to preserve. |
 | **Ports** | 4317 OTLP/gRPC · 4318 OTLP/HTTP · 13133 health. None public — reached only over Railway's private network. |
+| **Signals** | **Traces only.** Metrics are rejected at the receiver; see below. |
 | **Deployed by** | `railway up ./collector --path-as-root --service collector`. **Not** git-connected: `railway add --repo` returns Unauthorized and the CLI has no root-directory flag, so a redeploy is re-running that command from a checkout of `main`, not a push. |
 
 ## Configuration
@@ -94,6 +95,20 @@ properly needs P01 inside the application, which is not available for code we do
 `isPinned()` regex rather than borrowing the authority of `sapira-otel@<version>+genai.<commit>`,
 which asserts names hand-checked against a pinned upstream registry. These spans have no such claim
 behind them, and a dashboard can now tell the two sources apart.
+
+## Metrics have no store
+
+Phoenix is a **trace** store. It answers `/v1/metrics` with `405`, so for the first four minutes
+after Hermes was armed the collector exported metrics, was refused, and dropped them — 35 points,
+and a permanent error loop that would have buried every error worth reading.
+
+Both ends are now off: Hermes defaults `OTEL_METRICS_EXPORTER=none`, and this collector has no
+metrics pipeline, so the OTLP receiver **rejects** metrics outright. That is the loud version of the
+same truth, and better than a pipeline that looks configured and discards.
+
+The gap is real, not a decision to leave metrics behind: `ENG-STD-0018` covers metrics and
+`ENG-STD-0020 §2` floors them at 90 days. `ENG-ADR-0007` chose a *trace* store; nothing has chosen a
+metrics store. Restore both ends with that decision, not before it.
 
 ## The ledger route is not reachable yet
 
