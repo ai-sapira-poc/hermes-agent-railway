@@ -201,7 +201,11 @@ service:
       processors: [resource/ledger, batch]
       exporters: [otlp_http]
 
-    metrics:
-      receivers: [otlp]
-      processors: [memory_limiter, batch]
-      exporters: [otlp_http]
+    # NO METRICS PIPELINE. Phoenix is a trace store and answers /v1/metrics with 405, so this
+    # pipeline existed only to export, be refused, and drop -- and to fill the log with the
+    # failure. Removing it means the OTLP receiver REJECTS metrics outright, which is the loud
+    # version of the same truth: this collector has nowhere to send them.
+    #
+    # ENG-STD-0018 covers metrics and ENG-STD-0020 §2 floors them at 90 days, so the gap is real.
+    # ENG-ADR-0007 chose a trace store; no decision has chosen a metrics store. Restore this
+    # pipeline with that decision, not before it.
