@@ -82,7 +82,12 @@ fi
 # NOTE: this file is the IMAGE, so no DEVBRAIN_REF/FLEET_REF pin bump can deliver a change
 # here. It ships when this repo redeploys, which is why the multi-secret receiver in
 # dev-brain-shared and this line are two separate PRs that must both land.
-: "${GITHUB_WEBHOOK_SECRET_ENV:=DEVBRAIN_GITHUB_WEBHOOK_SECRET,STANDARDS_GITHUB_WEBHOOK_SECRET}"
+# PRREVIEW_GITHUB_WEBHOOK_SECRET is the hermes-pr-review App's key (agent-pr-review, the
+# cross-org PR reviewer). Its App-level webhook posts pull_request events from every
+# Sapira org here; dev-brain-shared's inbound_review.py catch-all routes any unclaimed
+# repo to that agent. Listing it before the var is set costs nothing — those deliveries
+# 401 until it lands, everything else keeps working.
+: "${GITHUB_WEBHOOK_SECRET_ENV:=DEVBRAIN_GITHUB_WEBHOOK_SECRET,STANDARDS_GITHUB_WEBHOOK_SECRET,PRREVIEW_GITHUB_WEBHOOK_SECRET}"
 export GITHUB_WEBHOOK_SECRET_ENV
 # own .env. Each gateway runs under that agent's OWN HERMES_HOME -> full memory
 # isolation.
