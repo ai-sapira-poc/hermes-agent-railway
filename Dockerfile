@@ -128,6 +128,29 @@ RUN set -eu; \
     rm -rf /tmp/minter /tmp/mint_build_token.py; \
     VIRTUAL_ENV=/opt/hermes-agent/venv uv pip install -r /opt/dev-brain-shared/requirements-service.txt
 
+# --- OpenTelemetry, zero-code ------------------------------------------------------
+# Hermes is upstream's code, pinned by SHA above. We do not own a line of it, so the only
+# instrumentation available is the kind that needs none: `opentelemetry-instrument` wraps
+# the process, patches the libraries it finds, and emits spans with no import anywhere in
+# the application -- which is also what ENG-STD-0018 §1 asks for, arrived at by necessity
+# rather than discipline.
+#
+# openai-v2 is the one that matters. The HTTP instrumentations give span shapes; only the
+# GenAI one gives `gen_ai.request.model` and token counts, and a dashboard without those
+# is outlines with no cost or model in them.
+#
+# PINNED, all of them. opentelemetry-api 1.44.0 is ALREADY in this venv as a transitive
+# dep, and the exporter below is pinned to exactly that version so this install adds
+# packages rather than upgrading one the runtime is already importing.
+RUN VIRTUAL_ENV=/opt/hermes-agent/venv uv pip install \
+      "opentelemetry-distro==0.65b0" \
+      "opentelemetry-exporter-otlp-proto-http==1.44.0" \
+      "opentelemetry-instrumentation-openai-v2==2.4b0" \
+      "opentelemetry-instrumentation-httpx==0.65b0" \
+      "opentelemetry-instrumentation-requests==0.65b0" \
+      "opentelemetry-instrumentation-aiohttp-client==0.65b0" \
+      "opentelemetry-instrumentation-fastapi==0.65b0"
+
 RUN mkdir -p /root/.hermes/{cron,sessions,logs,memories,skills,pairing,hooks,image_cache,audio_cache} \
     && cp cli-config.yaml.example /root/.hermes/config.yaml \
     && touch /root/.hermes/.env

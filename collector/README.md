@@ -68,3 +68,9 @@ a legal pipeline graph. What caught it was running 0.160.0 and counting exports.
 | 1 span in | **2 exports** | 1 export |
 | app span | — | `openinference.project.name=default`, `api_key` → `****` |
 | ledger-scope span | — | `openinference.project.name=sapira-ledger`, unsampled |
+
+And end to end against the deployed Phoenix, with the zero-code instrumentation the Hermes side
+uses: an `openai` SDK call produced `chat <model>` carrying `gen_ai.operation.name`,
+`gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.usage.input_tokens` and
+`gen_ai.usage.output_tokens`, all readable back out of Phoenix under those exact names. A planted
+content canary appeared nowhere.

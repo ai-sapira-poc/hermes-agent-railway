@@ -151,6 +151,61 @@ arm_online_notice() {  # arm_online_notice <profile-dir>
       > "${_home}/.restart_pending.json"; } 2>/dev/null || true
 }
 
+# === OpenTelemetry, zero-code ========================================================
+# Hermes is upstream's code (pinned by SHA in the Dockerfile) and we own none of it, so
+# the instrumentation is the kind that needs no import: `opentelemetry-instrument` wraps
+# the gateway process and patches the libraries it finds. Everything about where the
+# telemetry goes is decided in the collector, not here -- ENG-STD-0018 §4.
+#
+# OFF BY DEFAULT, and that is deliberate. This wrapper sits in front of the process that
+# runs every live agent on this box; turning it on is a Railway variable flip, and so is
+# turning it off again. A rollback that needs a redeploy is a rollback nobody reaches for
+# at the moment they need it.
+#
+#   HERMES_OTEL=on            arm it
+#   OTEL_SAMPLE_ALL=          unset. Sampling is the collector's lever, not this file's.
+: "${HERMES_OTEL:=off}"
+
+OTEL_WRAP=""
+if [ "${HERMES_OTEL}" = "on" ]; then
+  if command -v opentelemetry-instrument >/dev/null 2>&1; then
+    OTEL_WRAP="opentelemetry-instrument"
+
+    # Protobuf over OTLP/HTTP. The JSON exporter is a real package that fails at FLUSH
+    # time with a 415, long after every span looked fine -- the same trap the observability
+    # walkthrough hit against Phoenix.
+    export OTEL_EXPORTER_OTLP_PROTOCOL="${OTEL_EXPORTER_OTLP_PROTOCOL:-http/protobuf}"
+    export OTEL_EXPORTER_OTLP_ENDPOINT="${OTEL_EXPORTER_OTLP_ENDPOINT:-http://collector.railway.internal:4318}"
+    export OTEL_TRACES_EXPORTER="${OTEL_TRACES_EXPORTER:-otlp}"
+    export OTEL_METRICS_EXPORTER="${OTEL_METRICS_EXPORTER:-otlp}"
+    # Logs stay off. ENG-STD-0018 is about traces and metrics; piping this box's logs
+    # through the same door is a separate decision with a separate retention answer.
+    export OTEL_LOGS_EXPORTER="${OTEL_LOGS_EXPORTER:-none}"
+
+    # ENG-STD-0018 §5: content capture OFF unless an engagement explicitly enables it.
+    #
+    # NOT A BOOLEAN, despite reading like one. openai-v2 2.4b0 accepts exactly
+    # NO_CONTENT | SPAN_ONLY | EVENT_ONLY | SPAN_AND_EVENT, and anything else -- `false`
+    # and `true` alike -- is rejected with a warning and falls back to NO_CONTENT. So the
+    # safe direction happens to be the failure direction here, and the dangerous mistake
+    # is the opposite one: an engagement that enables capture with `true` gets no content
+    # and a warning nobody reads. Set explicitly, because a default is a thing a version
+    # bump can change and this one decides what personal data leaves the box.
+    export OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT="${OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT:-NO_CONTENT}"
+
+    # The build stamps already in /opt/method.env, as resource attributes, so a span can
+    # be traced back to the exact image that produced it.
+    _hermes_sha="$(. /opt/method.env 2>/dev/null; echo "${HERMES_SHA:-unknown}")"
+    export OTEL_RESOURCE_ATTRIBUTES="${OTEL_RESOURCE_ATTRIBUTES:-service.namespace=sapira,deployment.environment.name=production,hermes.revision=${_hermes_sha}}"
+
+    echo "OpenTelemetry armed -> ${OTEL_EXPORTER_OTLP_ENDPOINT}"
+  else
+    # Loud, not fatal. HERMES_OTEL=on with no instrumentation installed means the image
+    # predates it; the agents must still start.
+    echo "WARNING: HERMES_OTEL=on but opentelemetry-instrument is not installed; running uninstrumented" >&2
+  fi
+fi
+
 GATEWAY_PIDS=()
 for agent_dir in /root/.hermes/profiles/agent-*/; do
   [ -d "$agent_dir" ] || continue
@@ -159,8 +214,11 @@ for agent_dir in /root/.hermes/profiles/agent-*/; do
     agent_name="$(basename "$agent_dir")"
     arm_online_notice "$agent_dir"
     echo "Starting gateway for ${agent_name}..."
+    # One service.name per agent, so a fleet of them is separable in the store rather
+    # than a single undifferentiated "hermes". Empty OTEL_WRAP expands to nothing.
     HERMES_HOME="${agent_dir%/}" \
-      hermes gateway run >"/tmp/${agent_name}-gateway.log" 2>&1 &
+    OTEL_SERVICE_NAME="${agent_name}" \
+      ${OTEL_WRAP} hermes gateway run >"/tmp/${agent_name}-gateway.log" 2>&1 &
     GATEWAY_PIDS+=("$!")
   fi
 done
