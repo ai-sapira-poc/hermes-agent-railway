@@ -15,6 +15,18 @@ hermes ──OTLP──▶ collector ──▶ Phoenix
                      └──▶       project "sapira-ledger"  180d
 ```
 
+## Deployment record
+
+`ENG-STD-0021 §8` wants a service's persistent state, ports and configuration written down, and
+`§9` wants the pinned tag recorded where it can be inventoried.
+
+| | |
+|---|---|
+| **Image** | `otel/opentelemetry-collector-contrib:0.160.0` — pinned, bumped deliberately |
+| **Persistent state** | **None.** The collector buffers in memory and forwards; a restart loses at most one batch. Nothing here is worth a volume, and that is a property to preserve. |
+| **Ports** | 4317 OTLP/gRPC · 4318 OTLP/HTTP · 13133 health. None public — reached only over Railway's private network. |
+| **Deployed by** | `railway up ./collector --path-as-root --service collector`. **Not** git-connected: `railway add --repo` returns Unauthorized and the CLI has no root-directory flag, so a redeploy is re-running that command from a checkout of `main`, not a push. |
+
 ## Configuration
 
 | Variable | Value in this deployment |
@@ -45,6 +57,44 @@ the pipeline is boring.
 **A `health_check` extension**, so a crash-looping collector does not read as healthy. Telemetry
 that fails silently is worse than none.
 
+## What zero-code gets wrong, and what it cannot know
+
+Auto-instrumentation instruments the **SDK**, not the system. Two consequences, and they are
+repaired in different places because only one of them is repairable.
+
+**`gen_ai.provider.name` is wrong on every span, and repaired here.** openai-v2 reports the SDK, so
+a call Hermes routes to Anthropic through OpenRouter arrives labelled `openai`. A panel grouped by
+provider would have been wrong in the worst way: populated, plausible, never questioned. The
+`transform/genai` processor derives it from `server.address` instead — the thing we actually
+observe — and keeps the SDK's own claim on `sapira.gen_ai.provider.reported` rather than
+overwriting it silently.
+
+| `server.address` | `gen_ai.provider.name` |
+|---|---|
+| `openrouter.ai` | `openrouter` |
+| `omniroute-production-f03d.up.railway.app` | `omni-route` |
+| anything else | left as the SDK reported it |
+
+Behind `omni-route` the upstream vendor is chosen per request by the gateway and is **not
+observable from here**. `gen_ai.request.model` carries a vendor prefix (`anthropic/claude-opus-5`),
+but that is what was *asked for*, not proof of who served it — treating it as the latter would
+reintroduce exactly the false confidence this fixes.
+
+Every clause is guarded on `gen_ai.operation.name`. Without that guard the httpx instrumentation's
+span for the *same* request picks up a `gen_ai.*` attribute it has no business carrying, and the
+store fills with GenAI-shaped rows that are not model calls.
+
+**`sapira.run.id` and `sapira.ledger.key` are absent, and stay absent.** They mean "which agent run"
+and "which ledger entry", and nothing at this layer knows either. Setting them here would put a
+fabricated join key into a store people trust, which is worse than a missing column: a missing
+column is visible. **For zero-code sources the correlation key is the trace id.** Closing this
+properly needs P01 inside the application, which is not available for code we do not own.
+
+`sapira.semconv.version` *is* stamped, as `zero-code-openai-v2@2.4b0`. It deliberately fails P01's
+`isPinned()` regex rather than borrowing the authority of `sapira-otel@<version>+genai.<commit>`,
+which asserts names hand-checked against a pinned upstream registry. These spans have no such claim
+behind them, and a dashboard can now tell the two sources apart.
+
 ## The ledger route is not reachable yet
 
 `traces/ledger` routes on `instrumentation_scope.name == "@ai-sapira/action-ledger"`, and **no span
@@ -68,3 +118,9 @@ a legal pipeline graph. What caught it was running 0.160.0 and counting exports.
 | 1 span in | **2 exports** | 1 export |
 | app span | — | `openinference.project.name=default`, `api_key` → `****` |
 | ledger-scope span | — | `openinference.project.name=sapira-ledger`, unsampled |
+
+And end to end against the deployed Phoenix, with the zero-code instrumentation the Hermes side
+uses: an `openai` SDK call produced `chat <model>` carrying `gen_ai.operation.name`,
+`gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.usage.input_tokens` and
+`gen_ai.usage.output_tokens`, all readable back out of Phoenix under those exact names. A planted
+content canary appeared nowhere.
