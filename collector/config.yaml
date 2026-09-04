@@ -100,7 +100,8 @@ exporters:
   # self-hosted, reached here over Railway's private network so the traces never leave the project.
   #
   # SAPIRA_OTLP_AUTH_HEADER is the COMPLETE header value ("Bearer <token>"), not a bare token.
-  otlphttp:
+  # `otlp_http`, not `otlphttp`: 0.160.0 warns on the old alias at every start.
+  otlp_http:
     endpoint: ${env:SAPIRA_OTLP_ENDPOINT}
     headers:
       authorization: ${env:SAPIRA_OTLP_AUTH_HEADER}
@@ -135,7 +136,7 @@ service:
     traces/app:
       receivers: [routing]
       processors: [resource/app, probabilistic_sampler, batch]
-      exporters: [otlphttp]
+      exporters: [otlp_http]
 
     # NOT sampled. ENG-STD-0019 §5: a ledger entry must never be sampled away. Sampling a trace
     # loses a diagnostic; sampling a ledger entry means that for some proportion of the things the
@@ -147,9 +148,9 @@ service:
     traces/ledger:
       receivers: [routing]
       processors: [resource/ledger, batch]
-      exporters: [otlphttp]
+      exporters: [otlp_http]
 
     metrics:
       receivers: [otlp]
       processors: [memory_limiter, batch]
-      exporters: [otlphttp]
+      exporters: [otlp_http]
