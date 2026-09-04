@@ -74,7 +74,7 @@ ENV PATH="/opt/hermes-agent/venv/bin:$PATH"
 # the token-bearing remote URL. The token lives only in a shell var inside this single RUN.
 # NOTE: ARG values can appear in `docker history` of the intermediate layer; acceptable for
 # a self-owned private repo + short-lived token. Both pinned for reproducible deploys (A1).
-ARG DEVBRAIN_REF=6a9a1c4864bb818f287e1128bd0fb21b2a1727bd
+ARG DEVBRAIN_REF=fc498fdf8ff73e9a061f7adb62ae209627cd781f
 # sapira-agent-fleet: the agent ROSTER (who the agents are) + the seeding plumbing.
 # A SEPARATE pin from DEVBRAIN_REF on purpose -- a roster change (add an agent, move a
 # channel) must deploy without dragging in every dev-brain-shared commit merged since,
