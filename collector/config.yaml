@@ -69,6 +69,57 @@ processors:
     summary: debug
   # --- end generated ---
 
+  # Repairing what zero-code instrumentation gets wrong or cannot know.
+  #
+  # ENG-STD-0018 §4 again: this is a property of how Hermes is wired, and Hermes is upstream code we
+  # do not own, so the only place it can be fixed is here.
+  transform/genai:
+    error_mode: ignore
+    trace_statements:
+      - context: span
+        statements:
+          # `gen_ai.provider.name` is a LIE on every one of these spans. openai-v2 instruments the
+          # SDK, and reports the SDK — so a call Hermes routes to Anthropic through OpenRouter is
+          # labelled `openai`. A panel grouped by provider would be wrong in the way that is worst:
+          # populated, plausible, and never questioned.
+          #
+          # `server.address` is what we actually know, so provider is derived from it. The SDK's own
+          # claim is kept rather than overwritten silently — a normalisation nobody can see is the
+          # same class of problem as the bug it fixes.
+          - set(attributes["sapira.gen_ai.provider.reported"], attributes["gen_ai.provider.name"])
+              where attributes["gen_ai.operation.name"] != nil
+                and attributes["gen_ai.provider.name"] != nil
+                and attributes["server.address"] != nil
+          #
+          # Every clause below is guarded on `gen_ai.operation.name`. Without it the httpx
+          # instrumentation's own span for the SAME request — a plain client span to the same host —
+          # picks up a `gen_ai.provider.name` it has no business carrying, and the store gains
+          # GenAI-shaped rows that are not model calls.
+          - set(attributes["gen_ai.provider.name"], "openrouter")
+              where attributes["gen_ai.operation.name"] != nil
+                and attributes["server.address"] == "openrouter.ai"
+          - set(attributes["gen_ai.provider.name"], "omni-route")
+              where attributes["gen_ai.operation.name"] != nil
+                and attributes["server.address"] == "omniroute-production-f03d.up.railway.app"
+
+          # NOT resolved to a vendor, deliberately. Behind omni-route the upstream is chosen per
+          # request by the gateway and is not observable from here. `gen_ai.request.model` carries a
+          # vendor prefix (`anthropic/claude-opus-5`) but that is what was ASKED for, not proof of
+          # who served it, and treating it as the latter reintroduces the same false confidence.
+
+          # Which contract produced this span. P01 stamps `sapira-otel@<version>+genai.<commit>`,
+          # meaning names hand-checked against a pinned upstream registry. These spans have no such
+          # claim behind them, so they get a value that deliberately FAILS P01's `isPinned()` regex
+          # rather than borrowing its authority. A dashboard can then tell the two sources apart.
+          - set(attributes["sapira.semconv.version"], "zero-code-openai-v2@2.4b0")
+              where attributes["gen_ai.operation.name"] != nil
+                and attributes["sapira.semconv.version"] == nil
+
+          # `sapira.run.id` and `sapira.ledger.key` are NOT set here, and cannot be. They mean
+          # "which agent run" and "which ledger entry", and nothing at this layer knows either —
+          # inventing them would put a fabricated join key in a store people trust. For zero-code
+          # sources the correlation key is the trace id. See README.md.
+
   # Which Phoenix project a span lands in, and therefore which retention policy applies to it. Set
   # here and never in application code — ENG-STD-0018 §4, and the mechanism ENG-ADR-0007 recorded.
   # The two projects carry the ENG-STD-0020 §2 floors: 30 days for traces, 180 for the ledger.
@@ -129,7 +180,7 @@ service:
     # routes, which is the ordering the blueprint calls load-bearing.
     traces/in:
       receivers: [otlp]
-      processors: [memory_limiter, redaction/secrets]
+      processors: [memory_limiter, redaction/secrets, transform/genai]
       exporters: [routing]
 
     # Sampled. The expensive class.
