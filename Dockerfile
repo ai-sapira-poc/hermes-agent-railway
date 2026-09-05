@@ -91,7 +91,7 @@ ARG DEVBRAIN_REF=fc498fdf8ff73e9a061f7adb62ae209627cd781f
 # rebuild -- a DEVBRAIN_REF bump, say -- silently picked up whatever roster had been
 # merged since, deploying it without the bump PR that is supposed to record when a
 # roster change goes live. From here normal drift handling applies.
-ARG FLEET_REF=ae19b028f6e6db116ee16bb853cfde0375192b6c
+ARG FLEET_REF=bbbf8d873eb605eace7d1fa87683c5da3fd14d8b
 ARG INSTALLATION_ID=137054357
 # Build-time GitHub App creds. Accept both the legacy bare names and the
 # product-prefixed DEVBRAIN_* names (Railway populates ARGs from service
